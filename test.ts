@@ -13,3 +13,10 @@ module4 (Executive Summary Drafting) : list, add, detail, update, delete, ai res
 
 
 Now place the source code of ARC portal in Arc-Portal under the corresponding directory on the architecture
+
+
+Review Detail
+Control Environment Grading and Rationale
+Risk Management Grading and Rationale
+Issue Grading and Root Cause
+Key Messages
