@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文字自动选中效果</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            padding: 40px;
+            margin-bottom: 30px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(90deg, #ff8a00, #e52e71, #6a11cb);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 15px;
+            color: #2c3e50;
+            font-size: 2.5rem;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+            font-size: 1.2rem;
+        }
+        
+        .demo-text {
+            line-height: 1.8;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            padding: 25px;
+            border-radius: 10px;
+            background: #f8f9fa;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.05);
+            position: relative;
+        }
+        
+        .demo-text::before {
+            content: '"';
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            font-size: 60px;
+            color: #e0e0e0;
+            font-family: Georgia, serif;
+            line-height: 1;
+        }
+        
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 25px;
+            justify-content: center;
+        }
+        
+        button {
+            padding: 12px 25px;
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 7px 20px rgba(52, 152, 219, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(1px);
+        }
+        
+        .btn-auto {
+            background: linear-gradient(135deg, #2ecc71, #27ae60);
+            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
+        }
+        
+        .btn-auto:hover {
+            box-shadow: 0 7px 20px rgba(46, 204, 113, 0.4);
+        }
+        
+        .btn-reset {
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+        }
+        
+        .btn-reset:hover {
+            box-shadow: 0 7px 20px rgba(231, 76, 60, 0.4);
+        }
+        
+        .info-panel {
+            background: #e8f4fc;
+            border-radius: 10px;
+            padding: 25px;
+            margin-top: 20px;
+            border-left: 5px solid #3498db;
+        }
+        
+        .info-panel h3 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .selection-info {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 10px;
+            min-height: 80px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            border: 1px dashed #bdc3c7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+        
+        .highlight {
+            background-color: #ffeaa7;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        .tip {
+            background: #fff9e6;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 25px;
+            border-left: 5px solid #f1c40f;
+        }
+        
+        .tip h3 {
+            color: #e67e22;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .code-block {
+            background: #2d3436;
+            color: #dfe6e9;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 25px 0;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        
+        .feature {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        
+        .feature-icon {
+            font-size: 28px;
+            margin-right: 15px;
+            color: #3498db;
+            background: #e8f4fc;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .countdown {
+            font-size: 1.2rem;
+            text-align: center;
+            margin: 15px 0;
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 25px 20px;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            button {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+        }
+        table{
+            width: 100%;
+        }
+        table td, table th{
+            border: solid 1px #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="demo-text" id="demoText">
+            <table>
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th style="color: #27ae60;">姓名</th>
+                        <th>性别</th>
+                        <th>地址</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td>张三</td>
+                        <td style="background-color: #2980b9;">男</td>
+                        <td>广州市</td>
+                    </tr>
+                    <tr>
+                        <td>1</td>
+                        <td>张三</td>
+                        <td>男</td>
+                        <td>广州市</td>
+                    </tr>
+                    <tr>
+                        <td>1</td>
+                        <td>张三</td>
+                        <td>男</td>
+                        <td>广州市</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        
+        <div class="controls">
+            <button id="selectAllBtn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+                选中全部
+            </button>
+            <button id="copyBtn">复制</button>
+        </div>
+        
+        
+    </div>
+
+    <script>
+        // 获取DOM元素
+        const demoText = document.getElementById('demoText');
+        const selectionInfo = document.getElementById('selectionInfo');
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        
+        // 更新选中信息显示
+        function updateSelectionInfo(text) {
+            if (text && text.trim().length > 0) {
+                selectionInfo.innerHTML = `<span class="highlight">${text}</span>`;
+            } else {
+                selectionInfo.textContent = '等待选中文字...';
+            }
+        }
+        
+        // 选中指定元素内的文本
+        function selectElementText(element) {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            copyRichText()
+            // 显示选中信息
+            updateSelectionInfo(selection.toString());
+        }
+        
+        // 事件监听
+        selectAllBtn.addEventListener('click', function() {
+            selectElementText(demoText);
+        });
+        copyBtn.addEventListener('click', function() {
+            copyRichText();
+        });
+
+        // 复制选中文本到剪贴板
+        function copySelectedText() {
+            const selection = window.getSelection();
+            const selectedText = selection.toString();
+            
+            if (selectedText.length > 0) {
+                navigator.clipboard.writeText(selectedText)
+                    .then(() => {
+                        alert('已成功复制选中内容到剪贴板!');
+                    })
+                    .catch(err => {
+                        // 降级方案
+                        const textArea = document.createElement('textarea');
+                        textArea.value = selectedText;
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                        alert('已成功复制选中内容到剪贴板!');
+                    });
+            } else {
+                alert('请先选择一些文字!', true);
+            }
+        }
+
+        function copyRichText() {
+            const selection = window.getSelection();
+            
+            if (selection.toString().trim().length === 0) {
+                showNotification('请先选择一些文本!', true);
+                return;
+            }
+            
+            // 方法1: 使用现代Clipboard API写入HTML
+            if (navigator.clipboard && navigator.clipboard.write) {
+                // 获取选中的HTML内容
+                const selectedHTML = getSelectedHTML();
+                
+                // 创建包含HTML和纯文本的ClipboardItem
+                const htmlBlob = new Blob([selectedHTML], { type: 'text/html' });
+                const textBlob = new Blob([selection.toString()], { type: 'text/plain' });
+                
+                const clipboardItem = new ClipboardItem({
+                    'text/html': htmlBlob,
+                    'text/plain': textBlob
+                });
+                
+                navigator.clipboard.write([clipboardItem])
+                    .then(() => {
+                        alert('富文本已复制到剪贴板!');
+                    })
+                    .catch(err => {
+                        console.error('Clipboard API failed, trying fallback', err);
+                        // 如果现代API失败，尝试传统方法
+                    });
+            } else {
+                // 如果现代API失败，尝试传统方法
+            }
+        }
+
+        function getSelectedHTML() {
+            const selection = window.getSelection();
+            if (selection.rangeCount === 0) return '';
+            
+            const range = selection.getRangeAt(0);
+            const container = document.createElement('div');
+            container.appendChild(range.cloneContents());
+            
+            return container.innerHTML;
+        }
+        
+    </script>
+</body>
+</html>
