@@ -1,0 +1,470 @@
+// components/FileUpload.tsx
+import React, { useState, useRef, useCallback, DragEvent } from 'react';
+
+interface UploadFile {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  type: string;
+  uploadTime: Date;
+}
+
+interface FileUploadProps {
+  multiple?: boolean;
+  accept?: string;
+  maxSize?: number;
+  onFilesChange?: (files: UploadFile[]) => void;
+  className?: string;
+}
+
+const FileUpload: React.FC<FileUploadProps> = ({
+  multiple = true,
+  accept = '*/*',
+  maxSize = 10 * 1024 * 1024, // 10MB default
+  onFilesChange,
+  className = ''
+}) => {
+  const [files, setFiles] = useState<UploadFile[]>([]);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [dragRejectReason, setDragRejectReason] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 验证文件
+  const validateFile = (file: File): string | null => {
+    if (maxSize && file.size > maxSize) {
+      return `文件大小不能超过 ${formatFileSize(maxSize)}`;
+    }
+
+    if (accept !== '*/*') {
+      const acceptTypes = accept.split(',').map(type => type.trim());
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+      const fileType = file.type.toLowerCase();
+
+      const isValid = acceptTypes.some(type => {
+        if (type.startsWith('.')) {
+          // 扩展名匹配
+          return type.toLowerCase() === fileExtension;
+        } else if (type.endsWith('/*')) {
+          // 类型通配符匹配
+          const baseType = type.slice(0, -2);
+          return fileType.startsWith(baseType);
+        } else {
+          // 精确类型匹配
+          return fileType === type;
+        }
+      });
+
+      if (!isValid) {
+        return `不支持的文件类型，请选择 ${accept} 格式的文件`;
+      }
+    }
+
+    return null;
+  };
+
+  // 处理选择的文件
+  const handleFiles = useCallback((newFiles: FileList | File[]) => {
+    const fileArray = Array.from(newFiles);
+    const validFiles: UploadFile[] = [];
+    const rejections: string[] = [];
+
+    fileArray.forEach(file => {
+      const error = validateFile(file);
+      if (error) {
+        rejections.push(`${file.name}: ${error}`);
+      } else {
+        validFiles.push({
+          id: Math.random().toString(36).substr(2, 9),
+          file,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          uploadTime: new Date()
+        });
+      }
+    });
+
+    if (rejections.length > 0) {
+      alert(`以下文件上传失败：\n${rejections.join('\n')}`);
+    }
+
+    if (validFiles.length > 0) {
+      setFiles(prev => {
+        const updatedFiles = multiple ? [...prev, ...validFiles] : validFiles;
+        onFilesChange?.(updatedFiles);
+        return updatedFiles;
+      });
+    }
+  }, [multiple, onFilesChange, maxSize, accept]);
+
+  // 拖拽事件处理
+  const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(true);
+    setDragRejectReason('');
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // 只有当拖拽离开整个区域时才取消激活状态
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragActive(false);
+      setDragRejectReason('');
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setIsDragActive(false);
+    setDragRejectReason('');
+
+    const droppedFiles = e.dataTransfer.files;
+    if (droppedFiles && droppedFiles.length > 0) {
+      handleFiles(droppedFiles);
+    }
+  }, [handleFiles]);
+
+  // 点击上传处理
+  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = event.target.files;
+    if (selectedFiles && selectedFiles.length > 0) {
+      handleFiles(selectedFiles);
+    }
+    // 重置input，允许选择相同文件再次触发onChange
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleClickUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleRemoveFile = (id: string) => {
+    setFiles(prev => {
+      const updatedFiles = prev.filter(file => file.id !== id);
+      onFilesChange?.(updatedFiles);
+      return updatedFiles;
+    });
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const formatTime = (date: Date): string => {
+    return date.toLocaleTimeString('zh-CN', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  };
+
+  const getFileIcon = (fileType: string): string => {
+    if (fileType.startsWith('image/')) return '🖼️';
+    if (fileType.startsWith('video/')) return '🎥';
+    if (fileType.startsWith('audio/')) return '🎵';
+    if (fileType.includes('pdf')) return '📄';
+    if (fileType.includes('word') || fileType.includes('document')) return '📝';
+    if (fileType.includes('excel') || fileType.includes('spreadsheet')) return '📊';
+    if (fileType.includes('zip') || fileType.includes('compressed')) return '📦';
+    return '📎';
+  };
+
+  return (
+    <div className={`file-upload-container ${className}`}>
+      {/* 拖拽区域 */}
+      <div
+        className={`dropzone ${isDragActive ? 'active' : ''} ${dragRejectReason ? 'reject' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <div className="dropzone-content">
+          <div className="upload-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </div>
+          <p className="drag-text">
+            {dragRejectReason || (multiple ? '拖拽文件到此处或点击上传' : '拖拽文件到此处或点击选择文件')}
+          </p>
+          <button
+            type="button"
+            onClick={handleClickUpload}
+            className="upload-button"
+          >
+            选择文件
+          </button>
+          <p className="file-requirements">
+            支持 {accept === '*/*' ? '所有文件类型' : accept}，最大 {formatFileSize(maxSize)}
+          </p>
+        </div>
+        
+        {/* 隐藏的 file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple={multiple}
+          accept={accept}
+          onChange={handleFileInputChange}
+          className="file-input"
+        />
+      </div>
+
+      {/* 文件列表 */}
+      {files.length > 0 && (
+        <div className="file-list">
+          <h3 className="file-list-title">已上传文件 ({files.length})</h3>
+          <div className="files-container">
+            {files.map((file) => (
+              <div key={file.id} className="file-item">
+                <div className="file-info">
+                  <div className="file-icon">{getFileIcon(file.type)}</div>
+                  <div className="file-details">
+                    <div className="file-name" title={file.name}>{file.name}</div>
+                    <div className="file-meta">
+                      {formatFileSize(file.size)} • {formatTime(file.uploadTime)}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRemoveFile(file.id)}
+                  className="remove-button"
+                  aria-label={`删除 ${file.name}`}
+                  type="button"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        .file-upload-container {
+          width: 100%;
+          max-width: 600px;
+        }
+
+        .dropzone {
+          border: 2px dashed #d1d5db;
+          border-radius: 8px;
+          padding: 40px 20px;
+          text-align: center;
+          transition: all 0.3s ease;
+          background-color: #f9fafb;
+          position: relative;
+        }
+
+        .dropzone:hover {
+          border-color: #3b82f6;
+          background-color: #f0f9ff;
+        }
+
+        .dropzone.active {
+          border-color: #3b82f6;
+          background-color: #dbeafe;
+          transform: scale(1.02);
+        }
+
+        .dropzone.reject {
+          border-color: #ef4444;
+          background-color: #fef2f2;
+        }
+
+        .dropzone-content {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          pointer-events: none;
+        }
+
+        .upload-icon {
+          width: 48px;
+          height: 48px;
+          color: #9ca3af;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .dropzone.active .upload-icon {
+          color: #3b82f6;
+        }
+
+        .dropzone.reject .upload-icon {
+          color: #ef4444;
+        }
+
+        .upload-icon svg {
+          width: 100%;
+          height: 100%;
+        }
+
+        .drag-text {
+          margin: 0;
+          color: #6b7280;
+          font-size: 16px;
+          font-weight: 500;
+        }
+
+        .dropzone.reject .drag-text {
+          color: #ef4444;
+        }
+
+        .upload-button {
+          background-color: #3b82f6;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: background-color 0.2s;
+          pointer-events: auto;
+        }
+
+        .upload-button:hover {
+          background-color: #2563eb;
+        }
+
+        .file-requirements {
+          margin: 0;
+          font-size: 12px;
+          color: #9ca3af;
+        }
+
+        .file-input {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          opacity: 0;
+          cursor: pointer;
+        }
+
+        .file-list {
+          margin-top: 24px;
+        }
+
+        .file-list-title {
+          font-size: 18px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          color: #374151;
+        }
+
+        .files-container {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .file-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 12px;
+          border: 1px solid #e5e7eb;
+          border-radius: 6px;
+          background-color: white;
+          transition: all 0.2s;
+        }
+
+        .file-item:hover {
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+          border-color: #d1d5db;
+        }
+
+        .file-info {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .file-icon {
+          font-size: 20px;
+          flex-shrink: 0;
+        }
+
+        .file-details {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .file-name {
+          font-weight: 500;
+          color: #374151;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .file-meta {
+          font-size: 12px;
+          color: #6b7280;
+          margin-top: 2px;
+        }
+
+        .remove-button {
+          background: none;
+          border: none;
+          padding: 6px;
+          border-radius: 4px;
+          cursor: pointer;
+          color: #6b7280;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+
+        .remove-button:hover {
+          background-color: #fef2f2;
+          color: #ef4444;
+        }
+
+        .remove-button svg {
+          width: 16px;
+          height: 16px;
+          stroke-width: 2;
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default FileUpload;
