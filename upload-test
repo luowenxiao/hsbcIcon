@@ -1,0 +1,378 @@
+// components/__tests__/FileUpload.test.tsx
+import React from 'react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import FileUpload from '../FileUpload';
+
+// 模拟文件对象
+const createMockFile = (name: string, size: number, type: string): File => {
+  const file = new File([''], name, { type });
+  Object.defineProperty(file, 'size', { value: size });
+  return file;
+};
+
+// 模拟拖拽事件数据
+const createDragEventData = (files: File[]) => ({
+  dataTransfer: {
+    files,
+    items: files.map(file => ({
+      kind: 'file',
+      type: file.type,
+      getAsFile: () => file
+    })),
+    types: ['Files']
+  }
+});
+
+describe('FileUpload', () => {
+  const mockOnFilesChange = vi.fn();
+
+  beforeEach(() => {
+    mockOnFilesChange.mockClear();
+  });
+
+  describe('基础渲染', () => {
+    it('应该正确渲染上传区域', () => {
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      expect(screen.getByText(/拖拽文件到此处或点击上传/)).toBeInTheDocument();
+      expect(screen.getByText('选择文件')).toBeInTheDocument();
+    });
+
+    it('应该显示文件要求信息', () => {
+      render(
+        <FileUpload 
+          accept="image/*" 
+          maxSize={5242880} 
+          onFilesChange={mockOnFilesChange} 
+        />
+      );
+      
+      expect(screen.getByText(/支持 image\*/)).toBeInTheDocument();
+      expect(screen.getByText(/最大 5 MB/)).toBeInTheDocument();
+    });
+
+    it('单文件模式应该显示正确的提示文字', () => {
+      render(<FileUpload multiple={false} onFilesChange={mockOnFilesChange} />);
+      
+      expect(screen.getByText(/拖拽文件到此处或点击选择文件/)).toBeInTheDocument();
+    });
+  });
+
+  describe('文件选择功能', () => {
+    it('应该通过点击选择文件', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.png', 1024, 'image/png');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, file);
+      
+      expect(mockOnFilesChange).toHaveBeenCalledWith([
+        expect.objectContaining({
+          name: 'test.png',
+          size: 1024,
+          type: 'image/png'
+        })
+      ]);
+    });
+
+    it('应该支持多文件选择', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload multiple onFilesChange={mockOnFilesChange} />);
+      
+      const files = [
+        createMockFile('test1.png', 1024, 'image/png'),
+        createMockFile('test2.jpg', 2048, 'image/jpeg')
+      ];
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, files);
+      
+      expect(mockOnFilesChange).toHaveBeenCalledWith([
+        expect.objectContaining({ name: 'test1.png' }),
+        expect.objectContaining({ name: 'test2.jpg' })
+      ]);
+    });
+
+    it('单文件模式应该只保留最后一个文件', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload multiple={false} onFilesChange={mockOnFilesChange} />);
+      
+      const files = [
+        createMockFile('test1.png', 1024, 'image/png'),
+        createMockFile('test2.jpg', 2048, 'image/jpeg')
+      ];
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, files);
+      
+      // 应该只保留最后一个文件
+      expect(mockOnFilesChange).toHaveBeenCalledWith([
+        expect.objectContaining({ name: 'test2.jpg' })
+      ]);
+    });
+  });
+
+  describe('拖拽上传功能', () => {
+    it('应该处理文件拖拽上传', async () => {
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const dropzone = screen.getByText(/拖拽文件到此处或点击上传/).closest('div')!;
+      const file = createMockFile('dragged.png', 1024, 'image/png');
+      
+      // 触发拖拽进入
+      fireEvent.dragEnter(dropzone);
+      expect(dropzone).toHaveClass('active');
+      
+      // 触发拖拽放下
+      fireEvent.drop(dropzone, createDragEventData([file]));
+      
+      await waitFor(() => {
+        expect(mockOnFilesChange).toHaveBeenCalledWith([
+          expect.objectContaining({ name: 'dragged.png' })
+        ]);
+      });
+    });
+
+    it('拖拽离开时应该取消激活状态', () => {
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const dropzone = screen.getByText(/拖拽文件到此处或点击上传/).closest('div')!;
+      
+      fireEvent.dragEnter(dropzone);
+      expect(dropzone).toHaveClass('active');
+      
+      fireEvent.dragLeave(dropzone);
+      expect(dropzone).not.toHaveClass('active');
+    });
+
+    it('应该阻止拖拽事件的默认行为', () => {
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const dropzone = screen.getByText(/拖拽文件到此处或点击上传/).closest('div')!;
+      const preventDefault = vi.fn();
+      
+      fireEvent.dragOver(dropzone, { preventDefault });
+      expect(preventDefault).toHaveBeenCalled();
+    });
+  });
+
+  describe('文件验证', () => {
+    it('应该拒绝超过大小限制的文件', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload maxSize={1000} onFilesChange={mockOnFilesChange} />);
+      
+      const largeFile = createMockFile('large.png', 2000, 'image/png');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      // 模拟 window.alert
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      
+      await user.upload(fileInput, largeFile);
+      
+      expect(alertMock).toHaveBeenCalledWith(
+        expect.stringContaining('文件大小不能超过')
+      );
+      expect(mockOnFilesChange).not.toHaveBeenCalled();
+      
+      alertMock.mockRestore();
+    });
+
+    it('应该拒绝不支持的文件类型', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload accept="image/*" onFilesChange={mockOnFilesChange} />);
+      
+      const invalidFile = createMockFile('test.pdf', 1024, 'application/pdf');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      
+      await user.upload(fileInput, invalidFile);
+      
+      expect(alertMock).toHaveBeenCalledWith(
+        expect.stringContaining('不支持的文件类型')
+      );
+      expect(mockOnFilesChange).not.toHaveBeenCalled();
+      
+      alertMock.mockRestore();
+    });
+
+    it('应该接受符合扩展名的文件', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload accept=".pdf,.jpg" onFilesChange={mockOnFilesChange} />);
+      
+      const validFile = createMockFile('test.pdf', 1024, 'application/pdf');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, validFile);
+      
+      expect(mockOnFilesChange).toHaveBeenCalled();
+    });
+
+    it('应该同时处理有效和无效文件', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload accept="image/*" maxSize={1500} onFilesChange={mockOnFilesChange} />);
+      
+      const files = [
+        createMockFile('valid.png', 1024, 'image/png'), // 有效
+        createMockFile('invalid.pdf', 1024, 'application/pdf'), // 类型无效
+        createMockFile('large.jpg', 2000, 'image/jpeg') // 大小无效
+      ];
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      
+      await user.upload(fileInput, files);
+      
+      // 应该只调用一次，包含有效文件
+      expect(mockOnFilesChange).toHaveBeenCalledWith([
+        expect.objectContaining({ name: 'valid.png' })
+      ]);
+      expect(alertMock).toHaveBeenCalled();
+      
+      alertMock.mockRestore();
+    });
+  });
+
+  describe('文件列表管理', () => {
+    it('应该显示上传的文件列表', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.png', 1024, 'image/png');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, file);
+      
+      expect(screen.getByText('已上传文件 (1)')).toBeInTheDocument();
+      expect(screen.getByText('test.png')).toBeInTheDocument();
+      expect(screen.getByText('1 KB')).toBeInTheDocument();
+    });
+
+    it('应该支持删除文件', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const files = [
+        createMockFile('test1.png', 1024, 'image/png'),
+        createMockFile('test2.jpg', 2048, 'image/jpeg')
+      ];
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, files);
+      
+      // 找到第一个文件的删除按钮
+      const removeButtons = screen.getAllByLabelText(/删除/);
+      await user.click(removeButtons[0]);
+      
+      // 应该调用 onFilesChange 并移除第一个文件
+      expect(mockOnFilesChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({ name: 'test2.jpg' })
+      ]);
+      
+      // 列表应该更新
+      expect(screen.getByText('已上传文件 (1)')).toBeInTheDocument();
+      expect(screen.queryByText('test1.png')).not.toBeInTheDocument();
+      expect(screen.getByText('test2.jpg')).toBeInTheDocument();
+    });
+
+    it('删除文件后应该更新回调', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.png', 1024, 'image/png');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, file);
+      
+      // 删除文件
+      const removeButton = screen.getByLabelText(/删除 test\.png/);
+      await user.click(removeButton);
+      
+      expect(mockOnFilesChange).toHaveBeenLastCalledWith([]);
+      
+      // 重新渲染后文件列表应该为空
+      rerender(<FileUpload onFilesChange={mockOnFilesChange} />);
+      expect(screen.queryByText('已上传文件')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('文件类型图标', () => {
+    it('应该为图片文件显示图片图标', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.png', 1024, 'image/png');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, file);
+      
+      expect(screen.getByText('🖼️')).toBeInTheDocument();
+    });
+
+    it('应该为PDF文件显示文档图标', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.pdf', 1024, 'application/pdf');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, file);
+      
+      expect(screen.getByText('📄')).toBeInTheDocument();
+    });
+
+    it('应该为未知类型显示默认图标', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.xyz', 1024, 'application/xyz');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      await user.upload(fileInput, file);
+      
+      expect(screen.getByText('📎')).toBeInTheDocument();
+    });
+  });
+
+  describe('边缘情况', () => {
+    it('空文件选择不应该触发回调', async () => {
+      const user = userEvent.setup();
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      // 触发 change 事件但没有文件
+      fireEvent.change(fileInput, { target: { files: [] } });
+      
+      expect(mockOnFilesChange).not.toHaveBeenCalled();
+    });
+
+    it('拖拽空文件不应该触发回调', () => {
+      render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const dropzone = screen.getByText(/拖拽文件到此处或点击上传/).closest('div')!;
+      
+      fireEvent.drop(dropzone, createDragEventData([]));
+      
+      expect(mockOnFilesChange).not.toHaveBeenCalled();
+    });
+
+    it('组件卸载后不应该调用回调', async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<FileUpload onFilesChange={mockOnFilesChange} />);
+      
+      const file = createMockFile('test.png', 1024, 'image/png');
+      const fileInput = screen.getByLabelText(/选择文件/) as HTMLInputElement;
+      
+      unmount();
+      
+      await user.upload(fileInput, file);
+      
+      expect(mockOnFilesChange).not.toHaveBeenCalled();
+    });
+  });
+});
