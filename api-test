@@ -1,0 +1,270 @@
+// src/lib/__tests__/api.test.ts
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { apiFetch, ApiError } from '../api';
+import { useLoadingStore } from '../loadingStore';
+
+// Mock dependencies
+vi.mock('../loadingStore');
+vi.mock('next-runtime-env');
+vi.mock('@/components/SingleSignOn');
+
+// Mock environment variables
+vi.mock('next-runtime-env', () => ({
+  env: vi.fn(() => 'https://api.example.com'),
+}));
+
+// Mock window object for browser environment
+const mockMsalToken = { accessToken: 'mock-msal-token' };
+const mockCookieToken = 'mock-cookie-token';
+
+// Mock fetch global
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
+
+// Mock getFromCookies
+const mockGetFromCookies = {
+  accessToken: vi.fn(() => mockCookieToken),
+};
+
+describe('apiFetch', () => {
+  const mockShowLoading = vi.fn();
+  const mockHideLoading = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    
+    // Setup loading store mock
+    (useLoadingStore.getState as any).mockReturnValue({
+      showLoading: mockShowLoading,
+      hideLoading: mockHideLoading,
+    });
+
+    // Setup SingleSignOn mock
+    vi.mocked(require('@/components/SingleSignOn').getFromCookies).mockReturnValue(mockGetFromCookies);
+
+    // Setup global window and msalToken
+    Object.defineProperty(global, 'window', {
+      value: {},
+      writable: true,
+    });
+    (global as any).msalToken = undefined;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('successful requests', () => {
+    it('should make successful API call and return data', async () => {
+      const mockResponse = { data: 'test', success: true };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: vi.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      const result = await apiFetch<{ data: string; success: boolean }>('/test');
+
+      expect(mockShowLoading).toHaveBeenCalledOnce();
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/test',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer mock-cookie-token',
+          }),
+        })
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should handle 204 No Content response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        statusText: 'No Content',
+        json: vi.fn().mockRejectedValueOnce(new Error('No content')),
+      });
+
+      const result = await apiFetch('/test');
+
+      expect(result).toBeNull();
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it('should use msalToken when available', async () => {
+      (global as any).msalToken = mockMsalToken;
+      
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: vi.fn().mockResolvedValueOnce({ success: true }),
+      });
+
+      await apiFetch('/test');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/test',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer mock-msal-token',
+          }),
+        })
+      );
+    });
+
+    it('should not set Content-Type for fileUpload type', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: vi.fn().mockResolvedValueOnce({ success: true }),
+      });
+
+      await apiFetch('/upload', { method: 'POST' }, 'fileUpload');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/upload',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer mock-cookie-token',
+          }),
+        })
+      );
+      // Should not have Content-Type header for fileUpload
+      expect(mockFetch.mock.calls[0][1]?.headers).not.toHaveProperty('Content-Type');
+    });
+  });
+
+  describe('error handling', () => {
+    it('should throw ApiError for non-2xx responses with JSON error data', async () => {
+      const errorData = { message: 'Validation failed', errors: ['field required'] };
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: vi.fn().mockResolvedValueOnce(errorData),
+      });
+
+      await expect(apiFetch('/test')).rejects.toThrow(ApiError);
+
+      try {
+        await apiFetch('/test');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError<any>).status).toBe(400);
+        expect((error as ApiError<any>).statusText).toBe('Bad Request');
+        expect((error as ApiError<any>).data).toEqual(errorData);
+      }
+
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it('should throw ApiError for non-2xx responses with non-JSON error data', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: vi.fn().mockRejectedValueOnce(new Error('Not JSON')),
+      });
+
+      await expect(apiFetch('/test')).rejects.toThrow(ApiError);
+
+      try {
+        await apiFetch('/test');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError<any>).status).toBe(500);
+        expect((error as ApiError<any>).statusText).toBe('Internal Server Error');
+        expect((error as ApiError<any>).data).toEqual({ message: 'Internal Server Error' });
+      }
+    });
+
+    it('should throw generic error for network failures', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(apiFetch('/test')).rejects.toThrow('A network error occurred. Please try again.');
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('request configuration', () => {
+    it('should merge custom headers with default headers', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: vi.fn().mockResolvedValueOnce({ success: true }),
+      });
+
+      const customOptions: RequestInit = {
+        method: 'POST',
+        headers: {
+          'X-Custom-Header': 'custom-value',
+        },
+      };
+
+      await apiFetch('/test', customOptions);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/test',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer mock-cookie-token',
+            'X-Custom-Header': 'custom-value',
+          }),
+        })
+      );
+    });
+
+    it('should handle server-side rendering (no window)', async () => {
+      // Simulate server-side environment
+      Object.defineProperty(global, 'window', {
+        value: undefined,
+        writable: true,
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: vi.fn().mockResolvedValueOnce({ success: true }),
+      });
+
+      await apiFetch('/test');
+
+      // Should use empty token when window is undefined
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/test',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer ',
+          }),
+        })
+      );
+    });
+  });
+});
+
+describe('ApiError', () => {
+  it('should create ApiError with correct properties', () => {
+    const status = 404;
+    const statusText = 'Not Found';
+    const data = { message: 'Resource not found' };
+
+    const error = new ApiError(status, statusText, data);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.name).toBe('ApiError');
+    expect(error.status).toBe(status);
+    expect(error.statusText).toBe(statusText);
+    expect(error.data).toBe(data);
+    expect(error.message).toBe(`API Error: ${status} ${statusText}`);
+  });
+});
